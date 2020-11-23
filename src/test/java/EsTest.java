@@ -1,11 +1,24 @@
-import com.es.EsApplication;
+
 import com.es.pojo.Item;
 import com.es.repository.ItemRepository;
+import org.elasticsearch.index.query.MatchQueryBuilder;
+import org.elasticsearch.index.query.QueryBuilders;
+import org.elasticsearch.search.aggregations.Aggregation;
+import org.elasticsearch.search.aggregations.AggregationBuilders;
+import org.elasticsearch.search.aggregations.Aggregations;
+import org.elasticsearch.search.aggregations.bucket.terms.StringTerms;
+import org.elasticsearch.search.sort.SortBuilders;
+import org.elasticsearch.search.sort.SortOrder;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.elasticsearch.core.ElasticsearchTemplate;
+import org.springframework.data.elasticsearch.core.aggregation.AggregatedPage;
+import org.springframework.data.elasticsearch.core.query.*;
 import org.springframework.test.context.junit4.SpringRunner;
 
 import java.util.ArrayList;
@@ -24,6 +37,7 @@ public class EsTest {
 
     @Autowired
     private ItemRepository itemRepository;
+    private List<StringTerms.Bucket> buckets;
 
     @Test
     public void testCreate() {
@@ -69,6 +83,65 @@ public class EsTest {
         for (Item item : list) {
             System.out.println("item = " + item);
         }
+    }
 
+    @Test
+    public void TestFindBy() {
+        //获取QueryBuilder
+        MatchQueryBuilder matchQueryBuilder = QueryBuilders.matchQuery("title", "iphone");
+        Iterable<Item> iterable = itemRepository.search(matchQueryBuilder); //    Iterable<T> search(QueryBuilder var1);
+
+        NativeSearchQueryBuilder queryBuilder1 = new NativeSearchQueryBuilder();
+        Page<Item> pageResult = itemRepository.search(queryBuilder1.build());
+
+        SearchQuery query = new NativeSearchQueryBuilder().build();
+        MatchQueryBuilder queryBuilder = QueryBuilders.matchQuery("title", "xiaomi");
+        itemRepository.search(queryBuilder);
+    }
+
+    @Test
+    public void TestQuery() {
+        NativeSearchQueryBuilder nativeSearchQueryBuilder = new NativeSearchQueryBuilder();
+        //结果过滤
+        nativeSearchQueryBuilder.withSourceFilter(new FetchSourceFilter(new String[]{"id", "title", "price"}, null));
+        //添加查询条件
+        nativeSearchQueryBuilder.withQuery(QueryBuilders.matchQuery("title", "iphone"));
+
+        // 排序
+        nativeSearchQueryBuilder.withSort(SortBuilders.fieldSort("price").order(SortOrder.DESC));
+
+        // 分页
+        nativeSearchQueryBuilder.withPageable(PageRequest.of(1, 5));
+        Page<Item> result = itemRepository.search(nativeSearchQueryBuilder.build());
+
+        int totalPages = result.getTotalPages();
+        long total = result.getTotalElements();
+        //获取当前页
+        List<Item> list = result.getContent();
+        for (Item item : list) {
+            System.out.println(item);
+        }
+    }
+
+    @Test
+    public void TestAgg() {
+        NativeSearchQueryBuilder nativeSearchQueryBuilder = new NativeSearchQueryBuilder();
+
+        String aggName = "popularBrand";
+        //聚合
+        nativeSearchQueryBuilder.addAggregation(AggregationBuilders.terms(aggName).field("brand"));
+        // 查询并返回带聚合的结果
+        AggregatedPage<Item> items = template.queryForPage(nativeSearchQueryBuilder.build(), Item.class);
+
+        //解析聚合
+        Aggregations aggs = items.getAggregations();
+        //获取指定名称的聚合,得到其中一个聚合
+        StringTerms agg = aggs.get(aggName);
+        //得到buckets
+        List<StringTerms.Bucket> buckets = agg.getBuckets();
+        for (StringTerms.Bucket bucket : buckets) {
+            System.out.println("key = " + bucket.getKeyAsString());
+            System.out.println("docCount = " + bucket.getDocCount());
+        }
     }
 }
